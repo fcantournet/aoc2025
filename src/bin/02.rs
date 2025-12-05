@@ -22,9 +22,9 @@ pub fn part_two(input: &str) -> Option<u64> {
     let mut total = 0u64;
     for range in ranges {
         for i in range.0..=range.1 {
-            let chars: Vec<_> = i.to_string().chars().collect();
-            for size in 1..=chars.len() / 2 {
-                if valid(&chars, size) {
+            let s = i.to_string();
+            for size in 1..=s.len() / 2 {
+                if valid(&s, size) {
                     //println!("range {}-{} : {i}", range.0, range.1);
                     total += i as u64;
                     break; // do not count a single ID multiple times if it has several rule matches.
@@ -35,18 +35,24 @@ pub fn part_two(input: &str) -> Option<u64> {
     Some(total)
 }
 
-fn valid(s: &[char], length: usize) -> bool {
+fn valid(s: &str, length: usize) -> bool {
     if s.len() % length != 0 {
         return false;
     }
-    let mut chunks = s.chunks_exact(length);
-    let base = chunks.next().unwrap();
-    while let Some(next) = chunks.next() {
-        if base != next {
-            return false;
-        }
-    }
-    true
+    s[0..length]
+        .chars()
+        .cycle()
+        .zip(s[length..].chars())
+        .all(|(a, b)| a == b)
+
+    // let mut chunks = s.chunks_exact(length);
+    // let base = chunks.next().unwrap();
+    // while let Some(next) = chunks.next() {
+    //     if base != next {
+    //         return false;
+    //     }
+    // }
+    // true
 }
 
 fn parse_input(input: &str) -> Vec<(usize, usize)> {
