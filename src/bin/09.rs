@@ -1,4 +1,5 @@
 use glam::I64Vec2;
+use itertools::Itertools;
 
 advent_of_code::solution!(9);
 
@@ -60,14 +61,18 @@ fn rect_inside(
     // println!("does {} - {} fit ?", p1, p2);
     let p3 = I64Vec2 { x: p1.x, y: p2.y };
     let p4 = I64Vec2 { x: p2.x, y: p1.y };
-    [&p3, &p4].iter().all(|p| {
-        // fast check if we are ON the perimeter we are inside.
-        if on_perimeter(perimeter, p) {
-            true
-        } else {
-            inside_by_ray_casting(verts, horizontals, p)
-        }
-    })
+    if rect_intersects_perimeter(verts, horizontals, &[*p1, p3, *p2, p4]) {
+        return false;
+    } else {
+        [&p3, &p4].iter().all(|p| {
+            // fast check if we are ON the perimeter we are inside.
+            if on_perimeter(perimeter, p) {
+                true
+            } else {
+                inside_by_ray_casting(verts, horizontals, p)
+            }
+        })
+    }
 }
 
 // Check if points are ON the perimeter
@@ -132,6 +137,52 @@ fn inside_by_ray_casting(
     vert_intersect && horizontal_intersect
 }
 
+// follow each rect side and check if it intersects (and crosses) any perpendicular segment of the perimeter.
+fn rect_intersects_perimeter(
+    verts: &[(I64Vec2, I64Vec2)],
+    horizontals: &[(I64Vec2, I64Vec2)],
+    rect: &[I64Vec2; 4],
+) -> bool {
+    for (p1, p2) in rect.iter().circular_tuple_windows() {
+        let dir = p2 - p1;
+        match (I64Vec2::X.dot(dir), I64Vec2::Y.dot(dir)) {
+            (0, _) => {
+                // rect side is vertical : search horizontal perimeter segments
+                for (start, end) in horizontals {
+                    assert_eq!(p1.x, p2.x);
+                    // If one diff is positive and the other negative, p1x is between start.x and end.x.
+                    if (p1.x - start.x) * (p1.x - end.x) < 0 {
+                        // strictly because we do not want to check the edge case here.
+                        if (start.y - p1.y) * (start.y - p2.y) < 0 {
+                            // intersection with crossing
+                            return true;
+                        }
+                    }
+                }
+            }
+            (_, 0) => {
+                // rect side is horizontal : search vertical perimeter segments
+                for (start, end) in verts {
+                    assert_eq!(p1.y, p2.y);
+                    // If one diff is positive and the other negative, p1x is between start.x and end.x.
+                    if (p1.y - start.y) * (p1.y - end.y) < 0 {
+                        // strictly because we do not want to check the edge case here.
+                        if (start.x - p1.x) * (start.x - p2.x) < 0 {
+                            // intersection with crossing
+                            return true;
+                        }
+                    }
+                }
+            }
+            _ => {
+                dbg!(p1, p2, p2 - p1);
+                unreachable!("only vertical and horizontal segments !")
+            }
+        }
+    }
+    false
+}
+
 fn parse_input(input: &str) -> Vec<I64Vec2> {
     input
         .lines()
@@ -143,22 +194,6 @@ fn parse_input(input: &str) -> Vec<I64Vec2> {
             }
         })
         .collect()
-}
-
-fn display(points: &[I64Vec2], size: usize) {
-    let mut grid = vec![vec!['.'; size]; size];
-    for point in points {
-        grid[point.y as usize][point.x as usize] = '#';
-    }
-    for row in grid {
-        println!("{}", row.iter().collect::<String>());
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct Point {
-    x: isize,
-    y: isize,
 }
 
 fn makes_rect(p1: &I64Vec2, p2: &I64Vec2) -> usize {
