@@ -10,15 +10,12 @@ pub fn part_one(input: &str) -> Option<u64> {
             rects.push(makes_rect(p1, p2));
         }
     }
-    dbg!(&rects, &points);
+    // dbg!(&rects, &points);
     Some(rects.into_iter().max().unwrap() as u64)
 }
 
 pub fn part_two(input: &str) -> Option<u64> {
     let points = parse_input(input);
-
-    display(&points, 12);
-
     let mut perimeter: Vec<(I64Vec2, I64Vec2)> = Vec::new();
     for (p1, p2) in points.iter().zip(points.iter().cycle().skip(1)) {
         perimeter.push((*p1, *p2));
@@ -60,7 +57,7 @@ fn rect_inside(
     p1: &I64Vec2,
     p2: &I64Vec2,
 ) -> bool {
-    println!("does {} - {} fit ?", p1, p2);
+    // println!("does {} - {} fit ?", p1, p2);
     let p3 = I64Vec2 { x: p1.x, y: p2.y };
     let p4 = I64Vec2 { x: p2.x, y: p1.y };
     [&p3, &p4].iter().all(|p| {
