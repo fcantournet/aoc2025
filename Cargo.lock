@@ -23,6 +23,7 @@ version = "0.12.0"
 dependencies = [
  "chrono",
  "dhat",
+ "glam",
  "pico-args",
  "tinyjson",
 ]
@@ -131,6 +132,12 @@ name = "gimli"
 version = "0.28.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4271d37baee1b8c7e4b708028c57d816cf9d2434acb33a549475f78c181f6253"
+
+[[package]]
+name = "glam"
+version = "0.30.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bd47b05dddf0005d850e5644cae7f2b14ac3df487979dbfff3b56f20b1a6ae46"
 
 [[package]]
 name = "iana-time-zone"
