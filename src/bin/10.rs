@@ -96,10 +96,21 @@ fn push_button(button: &BitVec<usize>, state: BitVec<usize>) -> BitVec<usize> {
 // => for_each run the current algo with step_size == 2.
 // This should GREATLY reduce the size of the possible states set, because
 // state set size grow as a power of #(steps)
-// (There is also reddit magic to divide by 2 and figure blabla but I couldn't be arse let's check after)
+// (There is also reddit magic to divide by 2 and recurse but I couldn't be arse let's check
+// if step_size == 2 doesn't work.
 pub fn part_two(input: &str) -> Option<u64> {
     let machines = parse_input(input);
     let mut answer = 0;
+
+    for m in machines {
+        let min = recurse_simplify(&m, m.joltage.clone());
+
+        dbg!(min);
+
+        answer += min;
+    }
+
+    return Some(answer as u64);
 
     let bootstraped: Vec<(Machine, Vec<Vec<Button>>)> = machines
         .into_iter()
@@ -181,6 +192,63 @@ pub fn part_two(input: &str) -> Option<u64> {
     dbg!(&shortests);
 
     Some(shortests.iter().sum::<usize>() as u64)
+}
+
+fn recurse_simplify(
+    m: &Machine,
+    target: Vec<usize>,
+    // bootstrap: Vec<Button>,
+    // mut factor: usize,
+) -> usize {
+    // We're done
+    if target.iter().sum::<usize>() == 0 {
+        return 0;
+    }
+
+    // All valid bootstraps
+    let oddbits: BitVec<usize> = target.iter().map(|j| *j % 2 != 0).collect();
+    let mut valid = all_valid_button_presses_sets(&m, &oddbits);
+    valid.sort_by_key(|e| e.len());
+
+    let mut min = usize::MAX;
+    for v in valid {
+        println!("{:?}", &target);
+        if let Some(mut next_target) = bootstrap(&target, &v) {
+            if next_target.iter().sum::<usize>() == 0 {
+                min = v.len();
+                continue;
+            }
+            // simplify by dividing while all target elements are even (we can reach state 2*N by pressing the buttons for state N twice as many times)
+            let mut next_factor = 1usize;
+            while next_target.iter().all(|e| e % 2 == 0) {
+                next_target = next_target.iter().map(|e| e / 2).collect();
+                next_factor *= 2;
+            }
+
+            // recurse
+            let count = recurse_simplify(m, next_target);
+            min = min.min(v.len() + count * next_factor);
+        }
+    }
+
+    min
+}
+
+fn bootstrap(target: &[usize], bootstrap: &[Button]) -> Option<Vec<usize>> {
+    let mut sub = vec![0; target.len()];
+    let mut res = vec![0; target.len()];
+    for button in bootstrap {
+        for i in button.index.iter() {
+            sub[*i] += 1;
+        }
+    }
+    for (i, v) in target.iter().enumerate() {
+        if *v < sub[i] {
+            return None;
+        }
+        res[i] = v - sub[i];
+    }
+    return Some(res);
 }
 
 fn all_valid_button_presses_sets(m: &Machine, goal: &BitVec<usize>) -> Vec<Vec<Button>> {
@@ -347,4 +415,8 @@ mod tests {
 
         assert_eq!(res, state);
     }
+
+    // fn test_cannot_go_negative() {
+    //     let valid = all_valid_button_presses_sets(m, goal)
+    // }
 }
