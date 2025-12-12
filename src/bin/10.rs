@@ -1,13 +1,13 @@
-use bitvec::{index, prelude::*};
-use itertools::enumerate;
+use bitvec::prelude::*;
+use itertools::Itertools;
 use nom::Parser;
 use nom::branch::alt;
 use nom::character::complete::{self, newline, space1};
 use nom::multi::{fold_many1, separated_list1};
-use nom::{IResult, multi::many1, sequence::delimited};
-use std::ops::BitXor;
+use nom::{IResult, sequence::delimited};
 
 use std::collections::{HashMap, HashSet};
+use std::fmt::Display;
 
 advent_of_code::solution!(10);
 
@@ -30,8 +30,8 @@ pub fn part_one(input: &str) -> Option<u64> {
             i += 1;
             let mut next_states = HashSet::new();
             for s in states.iter() {
-                for b in m.buttons_as_bv.iter() {
-                    let ns = push_button(b.clone(), s.clone());
+                for b in m.buttons.iter() {
+                    let ns = push_button(&b.bv, s.clone());
                     if ns == m.goal {
                         found = true;
                     }
@@ -51,81 +51,165 @@ pub fn part_one(input: &str) -> Option<u64> {
 }
 
 // #[memoize(Ignore: m)]
-fn shortest_path(
-    m: &Machine,
-    state: BitVec<usize>,
-    last: Option<&BitVec<usize>>,
-    memo: &mut HashMap<BitVec<usize>, usize>,
-) -> usize {
-    if m.goal == state {
-        return 0;
-    }
-    if let Some(val) = memo.get(&state) {
-        return *val;
-    }
-    let next_states = m
-        .buttons_as_bv
-        .iter()
-        .filter(|&b| Some(b) != last)
-        .map(|b| (b, push_button(b.clone(), state.clone())));
-    let min = next_states
-        .map(|(b, s)| 1 + shortest_path(m, s, Some(b), memo))
-        .min()
-        .unwrap();
-    memo.insert(state, min);
-    min
-}
+// fn shortest_path(
+//     m: &Machine,
+//     state: BitVec<usize>,
+//     last: Option<&BitVec<usize>>,
+//     memo: &mut HashMap<BitVec<usize>, usize>,
+// ) -> usize {
+//     if m.goal == state {
+//         return 0;
+//     }
+//     if let Some(val) = memo.get(&state) {
+//         return *val;
+//     }
+//     let next_states = m
+//         .buttons_as_bv
+//         .iter()
+//         .filter(|&b| Some(b) != last)
+//         .map(|b| (b, push_button(b.clone(), state.clone())));
+//     let min = next_states
+//         .map(|(b, s)| 1 + shortest_path(m, s, Some(b), memo))
+//         .min()
+//         .unwrap();
+//     memo.insert(state, min);
+//     min
+// }
 
-fn push_button(button: BitVec<usize>, state: BitVec<usize>) -> BitVec<usize> {
+fn push_button(button: &BitVec<usize>, state: BitVec<usize>) -> BitVec<usize> {
     state ^ button
 }
 
+// insight from part1 that we initially didn't figure out :
+//  - pressing any key twice == NOOP (this bit we knew)
+//  - pressing ABC == ACB == CBA : order doesn't matter
+// => the entire problem space for a given goal bitvec is #(buttons)^2
+// i.e: for any button we either press it (2n-1) times or 2n times (so 0 or 1).
+// So for any machine we can easily compute all the button press combinations (#(buttons)^2) and check which
+// give a valid goal and which is shortest (for part1)
+//
+// 2nd insight is that joltage targets are similar : any even number ~ false, uneven to a true
+// in a new goal bitvec to calculate from joltage.
+//
+// So joltage => new_goal => all valid button combos for finish.
+// => press those, and subtract.
+// => for_each run the current algo with step_size == 2.
+// This should GREATLY reduce the size of the possible states set, because
+// state set size grow as a power of #(steps)
+// (There is also reddit magic to divide by 2 and figure blabla but I couldn't be arse let's check after)
 pub fn part_two(input: &str) -> Option<u64> {
-    return None;
     let machines = parse_input(input);
+    let mut answer = 0;
+
+    let bootstraped: Vec<(Machine, Vec<Vec<Button>>)> = machines
+        .into_iter()
+        .map(|m| {
+            // odd numbers in joltage ~ true bits in Machine.goal.
+            let new_goal: BitVec<usize> = m.joltage.iter().map(|j| *j % 2 != 0).collect();
+            let mut valid = all_valid_button_presses_sets(&m, &new_goal);
+            // dbg!(&valid);
+            valid.sort_by_key(|v| v.len());
+            (m, valid)
+        })
+        .collect();
 
     let mut shortests = Vec::new();
-    for m in machines {
-        let state = vec![0; m.joltage.len()];
-
-        let mut states: HashSet<Vec<usize>> = HashSet::new();
-        states.insert(state);
-        let mut i = 0;
-        let mut found = false;
-
-        loop {
-            // dbg!(states.len());
-            if i > 10000 || states.len() == 0 {
-                unreachable!("infinite loop ?")
+    for (m, bootstraps) in bootstraped {
+        let mut min = usize::MAX;
+        for bootstrap in bootstraps {
+            let mut state = vec![0; m.joltage.len()];
+            // apply bootstrap
+            for b in bootstrap.iter() {
+                state = fiddle_joltage(&b.index, state);
             }
-            i += 1;
-            let mut next_states = HashSet::new();
-            for s in states.iter() {
-                for b in m.buttons.iter() {
-                    let ns = fiddle_joltage(b, s.clone());
-                    if ns == m.joltage {
-                        found = true;
-                    }
-                    if ns.iter().enumerate().all(|(i, j)| m.joltage[i] >= *j) {
-                        next_states.insert(ns);
+            // println!(
+            //     "Applied {:#?} resulting in {:?} for target {:?}",
+            //     &bootstrap, &state, &m.joltage
+            // );
+
+            // Apply the bootstrap as a substraction on the target so we can then simplify further by dived until odd.
+            let mut new_target: Vec<_> = m
+                .joltage
+                .iter()
+                .zip(state)
+                .map(|(joltage, state)| joltage - state)
+                .collect();
+
+            // simplify by dividing while all target elements are even (we can reach state 2*N by pressing the buttons for state N twice as many times)
+            let mut factor = 1usize;
+            while new_target.iter().all(|e| e % 2 == 0) {
+                new_target = new_target.iter().map(|e| e / 2).collect();
+                factor *= 2;
+            }
+
+            let mut states: HashSet<Vec<usize>> = HashSet::new();
+            states.insert(vec![0; m.joltage.len()]);
+            let mut i = 0;
+            let mut found = false;
+            dbg!(&factor, &new_target);
+            loop {
+                dbg!(states.len());
+                if i > 1000 || states.len() == 0 {
+                    break;
+                }
+                i += 1;
+                let mut next_states = HashSet::new();
+                for s in states.iter() {
+                    for b in m.buttons.iter() {
+                        let ns = fiddle_joltage(&b.index, s.clone());
+                        if ns == new_target {
+                            found = true;
+                        }
+                        if ns.iter().enumerate().all(|(i, j)| new_target[i] >= *j) {
+                            next_states.insert(ns);
+                        }
                     }
                 }
+                if found {
+                    break;
+                }
+                states = next_states;
             }
             if found {
-                break;
+                let count = i * factor + bootstrap.len();
+                min = min.min(count);
             }
-            states = next_states;
         }
-
-        shortests.push(i);
+        shortests.push(min);
     }
 
+    dbg!(&shortests);
+
     Some(shortests.iter().sum::<usize>() as u64)
+}
+
+fn all_valid_button_presses_sets(m: &Machine, goal: &BitVec<usize>) -> Vec<Vec<Button>> {
+    m.buttons
+        .clone()
+        .into_iter()
+        .powerset()
+        .filter(|buttons| validate(goal, buttons))
+        .collect()
+}
+
+fn validate(goal: &BitVec<usize>, buttons: &[Button]) -> bool {
+    let mut state = bitvec![usize, Lsb0; 0; goal.len()];
+    for b in buttons {
+        state = state ^ &b.bv;
+    }
+    state == *goal
 }
 
 fn fiddle_joltage(button: &[usize], mut state: Vec<usize>) -> Vec<usize> {
     for j in button {
         state[*j] += 1;
+    }
+    state
+}
+
+fn fiddle_joltage_twice(button: &[usize], mut state: Vec<usize>) -> Vec<usize> {
+    for j in button {
+        state[*j] += 2;
     }
     state
 }
@@ -142,14 +226,17 @@ fn machine(input: &str) -> IResult<&str, Machine> {
     let (rest, joltage) = joltage(input)?;
 
     let size = goal.len();
-    let buttons_as_bv = buttons
+    let buttons = buttons
         .iter()
         .map(|b| {
             let mut bits = bitvec![usize, Lsb0; 0; size];
             for flip in b {
                 bits.set(*flip, true);
             }
-            bits
+            Button {
+                index: b.clone(),
+                bv: bits,
+            }
         })
         .collect();
 
@@ -158,7 +245,6 @@ fn machine(input: &str) -> IResult<&str, Machine> {
         Machine {
             goal,
             buttons,
-            buttons_as_bv,
             joltage,
         },
     ))
@@ -204,9 +290,20 @@ fn joltage(input: &str) -> IResult<&str, Vec<usize>> {
 #[derive(Debug, Clone)]
 struct Machine {
     goal: BitVec,
-    buttons: Vec<Vec<usize>>,
-    buttons_as_bv: Vec<BitVec<usize>>,
+    buttons: Vec<Button>,
     joltage: Vec<usize>,
+}
+
+#[derive(Debug, Clone)]
+struct Button {
+    index: Vec<usize>,
+    bv: BitVec<usize>,
+}
+
+impl Display for Button {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("{:?}", &self.index))
+    }
 }
 
 #[cfg(test)]
