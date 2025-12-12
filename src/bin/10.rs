@@ -103,95 +103,18 @@ pub fn part_two(input: &str) -> Option<u64> {
     let mut answer = 0;
 
     for m in machines {
-        let min = recurse_simplify(&m, m.joltage.clone());
+        let mut memo: HashMap<Vec<usize>, Option<usize>> = HashMap::new();
+
+        let min = recurse_simplify(&m, m.joltage.clone(), &mut memo, 0);
 
         dbg!(min);
 
-        answer += min;
+        if let Some(val) = min {
+            answer += val;
+        }
     }
 
     return Some(answer as u64);
-
-    let bootstraped: Vec<(Machine, Vec<Vec<Button>>)> = machines
-        .into_iter()
-        .map(|m| {
-            // odd numbers in joltage ~ true bits in Machine.goal.
-            let new_goal: BitVec<usize> = m.joltage.iter().map(|j| *j % 2 != 0).collect();
-            let mut valid = all_valid_button_presses_sets(&m, &new_goal);
-            // dbg!(&valid);
-            valid.sort_by_key(|v| v.len());
-            (m, valid)
-        })
-        .collect();
-
-    let mut shortests = Vec::new();
-    for (m, bootstraps) in bootstraped {
-        let mut min = usize::MAX;
-        for bootstrap in bootstraps {
-            let mut state = vec![0; m.joltage.len()];
-            // apply bootstrap
-            for b in bootstrap.iter() {
-                state = fiddle_joltage(&b.index, state);
-            }
-            // println!(
-            //     "Applied {:#?} resulting in {:?} for target {:?}",
-            //     &bootstrap, &state, &m.joltage
-            // );
-
-            // Apply the bootstrap as a substraction on the target so we can then simplify further by dived until odd.
-            let mut new_target: Vec<_> = m
-                .joltage
-                .iter()
-                .zip(state)
-                .map(|(joltage, state)| joltage - state)
-                .collect();
-
-            // simplify by dividing while all target elements are even (we can reach state 2*N by pressing the buttons for state N twice as many times)
-            let mut factor = 1usize;
-            while new_target.iter().all(|e| e % 2 == 0) {
-                new_target = new_target.iter().map(|e| e / 2).collect();
-                factor *= 2;
-            }
-
-            let mut states: HashSet<Vec<usize>> = HashSet::new();
-            states.insert(vec![0; m.joltage.len()]);
-            let mut i = 0;
-            let mut found = false;
-            dbg!(&factor, &new_target);
-            loop {
-                dbg!(states.len());
-                if i > 1000 || states.len() == 0 {
-                    break;
-                }
-                i += 1;
-                let mut next_states = HashSet::new();
-                for s in states.iter() {
-                    for b in m.buttons.iter() {
-                        let ns = fiddle_joltage(&b.index, s.clone());
-                        if ns == new_target {
-                            found = true;
-                        }
-                        if ns.iter().enumerate().all(|(i, j)| new_target[i] >= *j) {
-                            next_states.insert(ns);
-                        }
-                    }
-                }
-                if found {
-                    break;
-                }
-                states = next_states;
-            }
-            if found {
-                let count = i * factor + bootstrap.len();
-                min = min.min(count);
-            }
-        }
-        shortests.push(min);
-    }
-
-    dbg!(&shortests);
-
-    Some(shortests.iter().sum::<usize>() as u64)
 }
 
 fn recurse_simplify(
@@ -199,35 +122,57 @@ fn recurse_simplify(
     target: Vec<usize>,
     // bootstrap: Vec<Button>,
     // mut factor: usize,
-) -> usize {
+    memo: &mut HashMap<Vec<usize>, Option<usize>>,
+    depth: usize,
+) -> Option<usize> {
     // We're done
     if target.iter().sum::<usize>() == 0 {
-        return 0;
+        return Some(0);
+    }
+    if let Some(res) = memo.get(&target) {
+        return *res;
     }
 
     // All valid bootstraps
     let oddbits: BitVec<usize> = target.iter().map(|j| *j % 2 != 0).collect();
     let mut valid = all_valid_button_presses_sets(&m, &oddbits);
-    valid.sort_by_key(|e| e.len());
+    valid.sort_by_key(|e| e.0.len());
 
-    let mut min = usize::MAX;
+    let mut min = None;
+    // println!(
+    //     "{:indent$}possible combinations for bootstrap from {target:?}:",
+    //     "",
+    //     indent = depth * 4
+    // );
+    // for v in valid.iter() {
+    //     println!("{:indent$}{}", "", v, indent = depth * 4);
+    // }
     for v in valid {
-        println!("{:?}", &target);
-        if let Some(mut next_target) = bootstrap(&target, &v) {
-            if next_target.iter().sum::<usize>() == 0 {
-                min = v.len();
-                continue;
-            }
-            // simplify by dividing while all target elements are even (we can reach state 2*N by pressing the buttons for state N twice as many times)
-            let mut next_factor = 1usize;
-            while next_target.iter().all(|e| e % 2 == 0) {
-                next_target = next_target.iter().map(|e| e / 2).collect();
-                next_factor *= 2;
-            }
+        if let Some(mut next_target) = bootstrap(&target, &v.0) {
+            // if next_target.iter().sum::<usize>() == 0 {
+            //     min = min.min(Some(v.0.len()));
+            //     continue;
+            // }
+
+            // simplify by dividing by 2 since all target joltages are even.
+            // We can find the pattern that solves for half the values and repeat it twice.
+            next_target = next_target.iter().map(|e| e / 2).collect();
 
             // recurse
-            let count = recurse_simplify(m, next_target);
-            min = min.min(v.len() + count * next_factor);
+            let res = recurse_simplify(m, next_target.clone(), memo, depth + 1);
+            memo.insert(next_target.clone(), res);
+
+            let presses = v.0.len();
+            if let Some(count) = res {
+                min = min.or(Some(usize::MAX)).min(Some(presses + count * 2));
+            }
+            // println!(
+            //     "{:indent$}After {} to {:?} min: {min:?}={presses}+{res:?}*2",
+            //     "",
+            //     v,
+            //     &next_target,
+            //     indent = depth * 4
+            // );
         }
     }
 
@@ -251,12 +196,13 @@ fn bootstrap(target: &[usize], bootstrap: &[Button]) -> Option<Vec<usize>> {
     return Some(res);
 }
 
-fn all_valid_button_presses_sets(m: &Machine, goal: &BitVec<usize>) -> Vec<Vec<Button>> {
+fn all_valid_button_presses_sets(m: &Machine, goal: &BitVec<usize>) -> Vec<Buttons> {
     m.buttons
         .clone()
         .into_iter()
         .powerset()
         .filter(|buttons| validate(goal, buttons))
+        .map(|v| Buttons { 0: v })
         .collect()
 }
 
@@ -268,19 +214,19 @@ fn validate(goal: &BitVec<usize>, buttons: &[Button]) -> bool {
     state == *goal
 }
 
-fn fiddle_joltage(button: &[usize], mut state: Vec<usize>) -> Vec<usize> {
-    for j in button {
-        state[*j] += 1;
-    }
-    state
-}
+// fn fiddle_joltage(button: &[usize], mut state: Vec<usize>) -> Vec<usize> {
+//     for j in button {
+//         state[*j] += 1;
+//     }
+//     state
+// }
 
-fn fiddle_joltage_twice(button: &[usize], mut state: Vec<usize>) -> Vec<usize> {
-    for j in button {
-        state[*j] += 2;
-    }
-    state
-}
+// fn fiddle_joltage_twice(button: &[usize], mut state: Vec<usize>) -> Vec<usize> {
+//     for j in button {
+//         state[*j] += 2;
+//     }
+//     state
+// }
 
 fn parse_input(input: &str) -> Vec<Machine> {
     separated_list1(newline, machine).parse(input).unwrap().1
@@ -362,15 +308,33 @@ struct Machine {
     joltage: Vec<usize>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 struct Button {
     index: Vec<usize>,
     bv: BitVec<usize>,
 }
 
+impl std::fmt::Debug for Button {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self, f)
+    }
+}
+
+struct Buttons(Vec<Button>);
+
 impl Display for Button {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!("{:?}", &self.index))
+    }
+}
+
+impl Display for Buttons {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let _ = write!(f, "[ ");
+        for b in self.0.iter() {
+            let _ = write!(f, "{}", b);
+        }
+        write!(f, " ]")
     }
 }
 
@@ -389,6 +353,23 @@ mod tests {
     fn test_part_two() {
         let result = part_two(&advent_of_code::template::read_file("examples", DAY));
         assert_eq!(result, Some(33));
+    }
+
+    #[test]
+    fn failing_zero() {
+        // min: None=4+Some(0)*2
+        let mut min: Option<usize> = None;
+        let presses = 4;
+        let res = Some(0);
+        if let Some(count) = res {
+            min = min.or(Some(usize::MAX)).min(Some(presses + count * 2));
+        }
+
+        assert_eq!(min, Some(4));
+
+        let s = "[.##...] (0,1,5) (0,2,3,5) (0,3,4) (1,2) (0,1,2,4) {38,30,29,22,13,25}";
+        let result = part_two(s);
+        assert_eq!(result, Some(52));
     }
 
     // state  :  0 1 0 1 1
