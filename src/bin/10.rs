@@ -1,4 +1,3 @@
-use bitvec::prelude::*;
 use itertools::Itertools;
 use nom::Parser;
 use nom::branch::alt;
@@ -6,50 +5,30 @@ use nom::character::complete::{self, newline, space1};
 use nom::multi::{fold_many1, separated_list1};
 use nom::{IResult, sequence::delimited};
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt::Display;
 
 advent_of_code::solution!(10);
 
 pub fn part_one(input: &str) -> Option<u64> {
     let machines = parse_input(input);
-    // dbg!(&machines);
 
     let mut shortests = Vec::new();
     for m in machines {
-        let state = bitvec![usize, Lsb0; 0; m.goal.len()];
+        let mut valid: Vec<_> = m
+            .buttons
+            .into_iter()
+            .powerset()
+            .map(|v| Combination::new(v, m.joltage.len()))
+            .filter(|c| c.resulting_pattern.0 == m.goal.0)
+            .collect();
+        valid.sort_by_key(|c| c.buttons.len());
 
-        let mut states: HashSet<BitVec<usize>> = HashSet::new();
-        states.insert(state);
-        let mut i = 0;
-        let mut found = false;
-
-        loop {
-            i += 1;
-            let mut next_states = HashSet::new();
-            for s in states.iter() {
-                for b in m.buttons.iter() {
-                    let ns = push_button(&b.bv, s.clone());
-                    if ns == m.goal {
-                        found = true;
-                    }
-                    next_states.insert(ns);
-                }
-            }
-            if found {
-                break;
-            }
-            states = next_states;
-        }
-
-        shortests.push(i);
+        assert!(valid.len() > 0);
+        shortests.push(valid[0].buttons.len());
     }
 
     Some(shortests.iter().sum::<usize>() as u64)
-}
-
-fn push_button(button: &BitVec<usize>, state: BitVec<usize>) -> BitVec<usize> {
-    state ^ button
 }
 
 // insight from part1 that we initially didn't figure out :
@@ -81,7 +60,7 @@ pub fn part_two(input: &str) -> Option<u64> {
         // dbg!(&m, &combinations);
         let min = recurse_simplify(&combinations, m.joltage.clone(), &mut memo, 0);
 
-        dbg!(min);
+        // dbg!(min);
 
         if let Some(val) = min {
             answer += val;
@@ -165,15 +144,13 @@ fn machine(input: &str) -> IResult<&str, Machine> {
     let buttons = buttons
         .iter()
         .map(|b| {
-            let mut bits = bitvec![usize, Lsb0; 0; size];
             let mut values = vec![0; size];
             for flip in b {
-                bits.set(*flip, true);
                 values[*flip] = 1;
             }
             Button {
                 index: b.clone(),
-                bv: bits,
+                bv: SimpleBitVec::new(&values),
             }
         })
         .collect();
@@ -181,19 +158,19 @@ fn machine(input: &str) -> IResult<&str, Machine> {
     Ok((
         rest,
         Machine {
-            goal,
+            goal: SimpleBitVec::from(goal),
             buttons,
             joltage,
         },
     ))
 }
 
-fn goal(input: &str) -> IResult<&str, BitVec> {
+fn goal(input: &str) -> IResult<&str, Vec<bool>> {
     delimited(
         complete::char('['),
         fold_many1(
             alt((complete::char('#'), complete::char('.'))),
-            BitVec::<usize>::new,
+            Vec::<bool>::new,
             |mut acc, c| {
                 acc.push(match c {
                     '.' => false,
@@ -207,6 +184,7 @@ fn goal(input: &str) -> IResult<&str, BitVec> {
     )
     .parse(input)
 }
+
 fn button(input: &str) -> IResult<&str, Vec<usize>> {
     delimited(
         complete::char('('),
@@ -227,7 +205,7 @@ fn joltage(input: &str) -> IResult<&str, Vec<usize>> {
 
 #[derive(Debug, Clone)]
 struct Machine {
-    goal: BitVec,
+    goal: SimpleBitVec,
     buttons: Vec<Button>,
     joltage: Vec<usize>,
 }
@@ -235,7 +213,7 @@ struct Machine {
 #[derive(Clone)]
 struct Button {
     index: Vec<usize>,
-    bv: BitVec<usize>,
+    bv: SimpleBitVec,
 }
 
 // The result of applying a combination of Buttons
@@ -298,6 +276,19 @@ impl SimpleBitVec {
     }
 }
 
+impl From<Vec<bool>> for SimpleBitVec {
+    fn from(value: Vec<bool>) -> Self {
+        SimpleBitVec(
+            value
+                .iter()
+                .rev()
+                .enumerate()
+                .map(|(i, v)| if *v { 1 << i } else { 0 })
+                .sum(),
+        )
+    }
+}
+
 impl std::fmt::Debug for Button {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Display::fmt(&self, f)
@@ -345,28 +336,28 @@ mod tests {
         assert_eq!(result, Some(52));
     }
 
-    // state  :  0 1 0 1 1
-    // button :  0 1 1 1 1
-    // result :  0 0 1 0 0
-    //
-    #[test]
-    fn test_xor() {
-        let mut state = bitvec![usize, Lsb0; 0; 5];
-        let mut button = bitvec![usize, Lsb0; 0; 5];
+    // // state  :  0 1 0 1 1
+    // // button :  0 1 1 1 1
+    // // result :  0 0 1 0 0
+    // //
+    // #[test]
+    // fn test_xor() {
+    //     let mut state = bitvec![usize, Lsb0; 0; 5];
+    //     let mut button = bitvec![usize, Lsb0; 0; 5];
 
-        button.set(1, true);
-        button.set(2, true);
-        button.set(3, true);
-        button.set(4, true);
+    //     button.set(1, true);
+    //     button.set(2, true);
+    //     button.set(3, true);
+    //     button.set(4, true);
 
-        state.set(1, true);
-        state.set(3, true);
-        state.set(4, true);
+    //     state.set(1, true);
+    //     state.set(3, true);
+    //     state.set(4, true);
 
-        let res = state.clone() ^ button.clone();
-        // dbg!(&state, &button, &res);
-        let res = res ^ button;
+    //     let res = state.clone() ^ button.clone();
+    //     // dbg!(&state, &button, &res);
+    //     let res = res ^ button;
 
-        assert_eq!(res, state);
-    }
+    //     assert_eq!(res, state);
+    // }
 }
