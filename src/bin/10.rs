@@ -18,8 +18,6 @@ pub fn part_one(input: &str) -> Option<u64> {
     let mut shortests = Vec::new();
     for m in machines {
         let state = bitvec![usize, Lsb0; 0; m.goal.len()];
-        // let mut memo = HashMap::new();
-        // let s = shortest_path(&m, state, None, &mut memo);
 
         let mut states: HashSet<BitVec<usize>> = HashSet::new();
         states.insert(state);
@@ -50,32 +48,6 @@ pub fn part_one(input: &str) -> Option<u64> {
     Some(shortests.iter().sum::<usize>() as u64)
 }
 
-// #[memoize(Ignore: m)]
-// fn shortest_path(
-//     m: &Machine,
-//     state: BitVec<usize>,
-//     last: Option<&BitVec<usize>>,
-//     memo: &mut HashMap<BitVec<usize>, usize>,
-// ) -> usize {
-//     if m.goal == state {
-//         return 0;
-//     }
-//     if let Some(val) = memo.get(&state) {
-//         return *val;
-//     }
-//     let next_states = m
-//         .buttons_as_bv
-//         .iter()
-//         .filter(|&b| Some(b) != last)
-//         .map(|b| (b, push_button(b.clone(), state.clone())));
-//     let min = next_states
-//         .map(|(b, s)| 1 + shortest_path(m, s, Some(b), memo))
-//         .min()
-//         .unwrap();
-//     memo.insert(state, min);
-//     min
-// }
-
 fn push_button(button: &BitVec<usize>, state: BitVec<usize>) -> BitVec<usize> {
     state ^ button
 }
@@ -102,10 +74,12 @@ pub fn part_two(input: &str) -> Option<u64> {
     let machines = parse_input(input);
     let mut answer = 0;
 
+    let mut memo: HashMap<Vec<usize>, Option<usize>> = HashMap::new();
     for m in machines {
-        let mut memo: HashMap<Vec<usize>, Option<usize>> = HashMap::new();
-
-        let min = recurse_simplify(&m, m.joltage.clone(), &mut memo, 0);
+        memo.clear();
+        let combinations = all_button_combinations_with_cost(&m);
+        // dbg!(&m, &combinations);
+        let min = recurse_simplify(&combinations, m.joltage.clone(), &mut memo, 0);
 
         dbg!(min);
 
@@ -118,10 +92,8 @@ pub fn part_two(input: &str) -> Option<u64> {
 }
 
 fn recurse_simplify(
-    m: &Machine,
+    combinations: &[Combination],
     target: Vec<usize>,
-    // bootstrap: Vec<Button>,
-    // mut factor: usize,
     memo: &mut HashMap<Vec<usize>, Option<usize>>,
     depth: usize,
 ) -> Option<usize> {
@@ -132,101 +104,51 @@ fn recurse_simplify(
     if let Some(res) = memo.get(&target) {
         return *res;
     }
+    // println!("{:indent$} Solving for {target:?}", "", indent = depth * 4);
 
     // All valid bootstraps
-    let oddbits: BitVec<usize> = target.iter().map(|j| *j % 2 != 0).collect();
-    let mut valid = all_valid_button_presses_sets(&m, &oddbits);
-    valid.sort_by_key(|e| e.0.len());
+    // let oddbits: BitVec<usize> = target.iter().map(|j| *j % 2 != 0).collect();
+    //
+    let oddbits = SimpleBitVec::new(&target);
 
     let mut min = None;
-    // println!(
-    //     "{:indent$}possible combinations for bootstrap from {target:?}:",
-    //     "",
-    //     indent = depth * 4
-    // );
-    // for v in valid.iter() {
-    //     println!("{:indent$}{}", "", v, indent = depth * 4);
-    // }
-    for v in valid {
-        if let Some(mut next_target) = bootstrap(&target, &v.0) {
-            // if next_target.iter().sum::<usize>() == 0 {
-            //     min = min.min(Some(v.0.len()));
-            //     continue;
-            // }
-
-            // simplify by dividing by 2 since all target joltages are even.
-            // We can find the pattern that solves for half the values and repeat it twice.
-            next_target = next_target.iter().map(|e| e / 2).collect();
-
+    for c in combinations {
+        // Apply combination if valid and simplify by dividing by 2 since all target joltages will be even.
+        // We can find the pattern that solves for half the values and repeat it twice.
+        if let Some(next_target) = c.apply_if_valid(&target, &oddbits) {
             // recurse
-            let res = recurse_simplify(m, next_target.clone(), memo, depth + 1);
-            memo.insert(next_target.clone(), res);
-
-            let presses = v.0.len();
-            if let Some(count) = res {
-                min = min.or(Some(usize::MAX)).min(Some(presses + count * 2));
-            }
             // println!(
-            //     "{:indent$}After {} to {:?} min: {min:?}={presses}+{res:?}*2",
+            //     "{:indent$} got {next_target:?} using {c:?}",
             //     "",
-            //     v,
-            //     &next_target,
             //     indent = depth * 4
             // );
+            let res = recurse_simplify(combinations, next_target.clone(), memo, depth + 1);
+            memo.insert(next_target.clone(), res);
+
+            if let Some(count) = res {
+                let candidate = c.buttons.len() + count * 2;
+                min = min.or(Some(usize::MAX)).min(Some(candidate));
+                // println!(
+                //     "{:indent$} Solved {next_target:?} in {res:?}. {min:?} <= {candidate}={res:?}*2+{}",
+                //     "",
+                //     c.buttons.len(),
+                //     indent = depth * 4
+                // );
+            }
         }
     }
 
     min
 }
 
-fn bootstrap(target: &[usize], bootstrap: &[Button]) -> Option<Vec<usize>> {
-    let mut sub = vec![0; target.len()];
-    let mut res = vec![0; target.len()];
-    for button in bootstrap {
-        for i in button.index.iter() {
-            sub[*i] += 1;
-        }
-    }
-    for (i, v) in target.iter().enumerate() {
-        if *v < sub[i] {
-            return None;
-        }
-        res[i] = v - sub[i];
-    }
-    return Some(res);
-}
-
-fn all_valid_button_presses_sets(m: &Machine, goal: &BitVec<usize>) -> Vec<Buttons> {
+fn all_button_combinations_with_cost(m: &Machine) -> Vec<Combination> {
     m.buttons
         .clone()
         .into_iter()
         .powerset()
-        .filter(|buttons| validate(goal, buttons))
-        .map(|v| Buttons { 0: v })
+        .map(|v| Combination::new(v, m.joltage.len()))
         .collect()
 }
-
-fn validate(goal: &BitVec<usize>, buttons: &[Button]) -> bool {
-    let mut state = bitvec![usize, Lsb0; 0; goal.len()];
-    for b in buttons {
-        state = state ^ &b.bv;
-    }
-    state == *goal
-}
-
-// fn fiddle_joltage(button: &[usize], mut state: Vec<usize>) -> Vec<usize> {
-//     for j in button {
-//         state[*j] += 1;
-//     }
-//     state
-// }
-
-// fn fiddle_joltage_twice(button: &[usize], mut state: Vec<usize>) -> Vec<usize> {
-//     for j in button {
-//         state[*j] += 2;
-//     }
-//     state
-// }
 
 fn parse_input(input: &str) -> Vec<Machine> {
     separated_list1(newline, machine).parse(input).unwrap().1
@@ -244,8 +166,10 @@ fn machine(input: &str) -> IResult<&str, Machine> {
         .iter()
         .map(|b| {
             let mut bits = bitvec![usize, Lsb0; 0; size];
+            let mut values = vec![0; size];
             for flip in b {
                 bits.set(*flip, true);
+                values[*flip] = 1;
             }
             Button {
                 index: b.clone(),
@@ -314,27 +238,75 @@ struct Button {
     bv: BitVec<usize>,
 }
 
+// The result of applying a combination of Buttons
+#[derive(Debug, Clone)]
+struct Combination {
+    result: Vec<usize>,
+    buttons: Vec<Button>,
+    resulting_pattern: SimpleBitVec,
+}
+
+impl Combination {
+    fn new(buttons: Vec<Button>, num_joltages: usize) -> Self {
+        let mut result = vec![0; num_joltages];
+        for b in buttons.iter() {
+            for flip in b.index.iter() {
+                result[*flip] += 1;
+            }
+        }
+        let resulting_pattern = SimpleBitVec::new(&result);
+        Self {
+            result,
+            buttons,
+            resulting_pattern,
+        }
+    }
+
+    fn apply_if_valid(&self, target: &[usize], oddbits: &SimpleBitVec) -> Option<Vec<usize>> {
+        // this combination doesn't validate the target resulting parity pattern.
+        if oddbits.0 != self.resulting_pattern.0 {
+            return None;
+        }
+        let mut res = vec![0; target.len()];
+        for (i, v) in target.iter().enumerate() {
+            if *v < self.result[i] {
+                return None;
+            }
+            res[i] = (v - self.result[i]) / 2;
+        }
+        return Some(res);
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SimpleBitVec(usize);
+
+impl SimpleBitVec {
+    // takes a vec of values and return a bitvec if parity of those values.
+    // This can be used to validate that applying a bunch of buttons gives the expected
+    // bit parity result.
+    fn new(values: &[usize]) -> Self {
+        // rev because the values are in order of most significant bit
+        SimpleBitVec(
+            values
+                .iter()
+                .rev()
+                .enumerate()
+                .map(|(i, v)| if v % 2 != 0 { 1 << i } else { 0 })
+                .sum(),
+        )
+    }
+}
+
 impl std::fmt::Debug for Button {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Display::fmt(&self, f)
     }
 }
 
-struct Buttons(Vec<Button>);
-
 impl Display for Button {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!("{:?}", &self.index))
-    }
-}
-
-impl Display for Buttons {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let _ = write!(f, "[ ");
-        for b in self.0.iter() {
-            let _ = write!(f, "{}", b);
-        }
-        write!(f, " ]")
     }
 }
 
@@ -361,6 +333,7 @@ mod tests {
         let mut min: Option<usize> = None;
         let presses = 4;
         let res = Some(0);
+
         if let Some(count) = res {
             min = min.or(Some(usize::MAX)).min(Some(presses + count * 2));
         }
@@ -396,8 +369,4 @@ mod tests {
 
         assert_eq!(res, state);
     }
-
-    // fn test_cannot_go_negative() {
-    //     let valid = all_valid_button_presses_sets(m, goal)
-    // }
 }
