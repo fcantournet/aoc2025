@@ -1,48 +1,53 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, usize};
 
 advent_of_code::solution!(11);
 
-pub fn part_one(input: &str) -> Option<u64> {
-    let devices = parse_input(input);
-    let mut visited: HashMap<String, usize> = HashMap::new();
+const ALPHA_BASE: usize = 26;
+const UNIVERSE: usize = ALPHA_BASE * ALPHA_BASE * ALPHA_BASE;
 
-    let total = recursive_walk(&devices, "you", "out", "inexistant", &mut visited);
+pub fn part_one(input: &str) -> Option<u64> {
+    let mut map = [const { Vec::new() }; UNIVERSE];
+    parse_input(input, &mut map);
+    let mut visited = [None; UNIVERSE];
+    let you = name_to_id("you");
+    let out = name_to_id("out");
+    let inexistant = usize::MAX;
+    let total = recursive_walk(&map, you, out, inexistant, &mut visited);
 
     Some(total as u64)
 }
 
 fn recursive_walk(
-    devices: &HashMap<String, Vec<String>>,
-    start: &str,
-    end: &str,
-    excluding: &str,
-    visited: &mut HashMap<String, usize>,
+    devices: &[Vec<usize>; UNIVERSE],
+    start: usize,
+    end: usize,
+    excluding: usize,
+    visited: &mut [Option<usize>; UNIVERSE],
 ) -> usize {
     if start == end {
         return 1;
     }
-    if let Some(counted) = visited.get(start) {
-        return *counted;
+    if let Some(counted) = visited[start] {
+        return counted;
     }
-    // println!("visiting {} for the first time", start);
     if let Some(outs) = devices.get(start) {
         let mut path_leading_to_out = 0usize;
         for out in outs {
-            if out == excluding {
+            if *out == excluding {
                 continue;
             }
-            let new_paths = recursive_walk(devices, out, end, excluding, visited);
+            let new_paths = recursive_walk(devices, *out, end, excluding, visited);
             path_leading_to_out += new_paths;
         }
-        println!("{path_leading_to_out} paths from {start} to {end}");
-        visited.insert(start.to_string(), path_leading_to_out);
+        visited[start] = Some(path_leading_to_out);
         return path_leading_to_out;
     }
     0
 }
 
 pub fn part_two(input: &str) -> Option<u64> {
-    let devices = parse_input(input);
+    let mut map = [const { Vec::new() }; UNIVERSE];
+    parse_input(input, &mut map);
     let path: Vec<_> = [
         ("svr", "dac", "fft"),
         ("svr", "fft", "dac"),
@@ -53,8 +58,11 @@ pub fn part_two(input: &str) -> Option<u64> {
     ]
     .iter()
     .map(|(start, end, excluding)| {
-        let mut visited: HashMap<String, usize> = HashMap::new();
-        recursive_walk(&devices, start, end, excluding, &mut visited)
+        let mut visited = [None; UNIVERSE];
+        let start = name_to_id(start);
+        let end = name_to_id(end);
+        let excluding = name_to_id(excluding);
+        recursive_walk(&map, start, end, excluding, &mut visited)
     })
     .collect();
 
@@ -62,23 +70,36 @@ pub fn part_two(input: &str) -> Option<u64> {
     Some((path[0] * path[5] * path[2] + path[1] * path[4] * path[3]) as u64)
 }
 
-fn parse_input(input: &str) -> HashMap<String, Vec<String>> {
-    input
-        .lines()
-        .map(|line| {
-            let (dev, outs) = line.split_once(":").unwrap();
-            let outs = outs
-                .trim()
-                .split_whitespace()
-                .map(|s| s.to_string())
-                .collect();
-            (dev.into(), outs)
-        })
-        .collect()
+fn parse_input(input: &str, map: &mut [Vec<usize>; UNIVERSE]) {
+    for (dev, outs) in input.lines().map(|line| {
+        let (dev, outs) = line.split_once(":").unwrap();
+        let outs: Vec<usize> = outs
+            .trim()
+            .split_whitespace()
+            .map(|s| name_to_id(s))
+            .collect();
+        (name_to_id(&dev), outs)
+    }) {
+        map[dev] = outs;
+    }
 }
 
-struct Device {
-    out: Vec<String>,
+fn name_to_id(name: &str) -> usize {
+    // iterate over chars from most significant char and convert to base 26
+    name.chars()
+        .fold(0, |acc, c| acc * 26 + (c as u8 - 'a' as u8) as usize)
+}
+
+fn id_to_name(id: usize) -> String {
+    let mut div = id;
+    let mut res = ['0'; 3];
+    for i in 0..3 {
+        let rm = div % 26;
+        res[i] = (rm as u8 + 'a' as u8) as char;
+        dbg!(rm, div, &res);
+        div = div / 26;
+    }
+    res.iter().rev().collect()
 }
 
 #[cfg(test)]
@@ -97,5 +118,14 @@ mod tests {
             "examples", DAY, 2,
         ));
         assert_eq!(result, Some(2));
+    }
+
+    #[test]
+    fn test_encoding() {
+        assert_eq!(12 / 14, 0);
+        let name = "abc";
+        let id = name_to_id(name);
+        dbg!(id);
+        assert_eq!(name, id_to_name(id));
     }
 }
